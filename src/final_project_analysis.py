@@ -29,6 +29,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
     f1_score,
     mean_absolute_error,
     mean_squared_error,
@@ -44,30 +45,84 @@ DATA_PATH = PROJECT_ROOT / "data" / "imdb_movies.csv"
 RANDOM_STATE = 42
 
 
+NUMERIC_MODEL_FEATURES = [
+    "log_budget",
+    "log_revenue",
+    "log_profit_shifted",
+    "roi_capped",
+    "release_year",
+]
+
+CATEGORICAL_MODEL_FEATURES = ["main_genre", "language", "country"]
+
+
 def ensure_output_dirs() -> None:
+    """Create output folders used by the project."""
     OUTPUT_DIR.mkdir(exist_ok=True)
     FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def normalize_text(value: object) -> str:
+    """Normalize text/categorical values and replace missing values."""
     if pd.isna(value):
         return "Unknown"
 
     text = str(value).replace("\xa0", " ").strip()
     return text if text else "Unknown"
 
-# Loads the CSV, renames columns, parses dates, creates useful features, and filters to usable released movies. This is where most feature engineering happens:
 
-# profit = revenue - budget
-# roi = profit / budget
-# roi_capped reduces extreme ROI outliers
-# log_budget and log_revenue reduce skew
-# log_profit_shifted handles negative profit before log-transforming
+def write_data_quality_summary(raw_df: pd.DataFrame, cleaned_df: pd.DataFrame) -> None:
+    """Save a small summary of dataset cleaning and data quality checks."""
+    budget_col = "budget_x" if "budget_x" in raw_df.columns else "budget"
+    revenue_col = "revenue"
 
-# money variables are very skewed, so log features are usually better for regression/classification than raw dollar values.
+    raw_budget = pd.to_numeric(raw_df[budget_col], errors="coerce")
+    raw_revenue = pd.to_numeric(raw_df[revenue_col], errors="coerce")
+    raw_score = pd.to_numeric(raw_df["score"], errors="coerce")
+
+    summary = {
+        "original_rows": len(raw_df),
+        "cleaned_rows": len(cleaned_df),
+        "rows_removed": len(raw_df) - len(cleaned_df),
+        "percent_rows_removed": round(
+            (len(raw_df) - len(cleaned_df)) / len(raw_df), 4
+        ),
+        "missing_genre_count": int(raw_df["genre"].isna().sum()),
+        "missing_genre_rate": round(float(raw_df["genre"].isna().mean()), 4),
+        "missing_crew_count": int(raw_df["crew"].isna().sum())
+        if "crew" in raw_df.columns
+        else None,
+        "missing_crew_rate": round(float(raw_df["crew"].isna().mean()), 4)
+        if "crew" in raw_df.columns
+        else None,
+        "zero_budget_count": int((raw_budget == 0).sum()),
+        "zero_budget_rate": round(float((raw_budget == 0).mean()), 4),
+        "zero_revenue_count": int((raw_revenue == 0).sum()),
+        "zero_revenue_rate": round(float((raw_revenue == 0).mean()), 4),
+        "score_min": float(raw_score.min()),
+        "score_max": float(raw_score.max()),
+        "score_mean": float(raw_score.mean()),
+        "score_median": float(raw_score.median()),
+    }
+
+    pd.DataFrame([summary]).to_csv(
+        OUTPUT_DIR / "data_quality_summary.csv", index=False
+    )
+    
+def group_rare_categories(
+    df: pd.DataFrame,
+    column: str,
+    min_count: int = 50,
+) -> pd.Series:
+    counts = df[column].value_counts()
+    common_values = counts[counts >= min_count].index
+    return df[column].where(df[column].isin(common_values), "Other")
+
 
 def load_and_clean_data() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH)
+    """Load the IMDb dataset, clean fields, and create engineered features."""
+    raw_df = pd.read_csv(DATA_PATH)
+    df = raw_df.copy()
 
     df = df.rename(
         columns={
@@ -108,15 +163,16 @@ def load_and_clean_data() -> pd.DataFrame:
     df["log_budget"] = np.log1p(df["budget"].clip(lower=0))
     df["log_revenue"] = np.log1p(df["revenue"].clip(lower=0))
 
-    # Profit can be negative, so we shift it before taking log1p.
-    # This keeps the feature usable while reducing the effect of extreme outliers.
+    # Profit can be negative, so it is shifted before log-transforming.
     df["log_profit_shifted"] = np.log1p(
         (df["profit"] - df["profit"].min()).clip(lower=0)
     )
+    
+    
 
     # Keep only completed movies with usable score and financial fields.
-    # Budget/revenue values of 0 are retained because they make up a small portion
-    # of the data and may represent unreported values rather than true zeros.
+    # Zero budget/revenue values are retained because they are uncommon and
+    # may represent unreported values rather than true zeros.
     cleaned = df[df["status"].eq("Released")].copy()
     cleaned = cleaned.dropna(subset=["score", "budget", "revenue"])
     cleaned = cleaned[
@@ -125,18 +181,24 @@ def load_and_clean_data() -> pd.DataFrame:
         & (cleaned["revenue"] >= 0)
     ]
 
+    # Group rare categories after filtering so counts reflect the final dataset.
+    for col in ["main_genre", "language", "country"]:
+        cleaned[col] = group_rare_categories(cleaned, col, min_count=50)
+
+    write_data_quality_summary(raw_df, cleaned)
     cleaned.to_csv(OUTPUT_DIR / "cleaned_movies.csv", index=False)
     return cleaned
 
 
 def save_plot(filename: str) -> None:
+    """Save and close the current matplotlib figure."""
     plt.tight_layout()
     plt.savefig(FIGURE_DIR / filename, dpi=200, bbox_inches="tight")
     plt.close()
-    
-# Creates plots for score, budget, revenue, log-budget, log-revenue, budget/revenue vs. score, and score by genre/language/country.
-# this supports the report’s EDA section and gives you visuals that match course topics: histograms, scatter plots, and boxplots.
+
+
 def make_eda_visualizations(df: pd.DataFrame) -> None:
+    """Create exploratory plots for distributions, relationships, and categories."""
     sns.set_theme(style="whitegrid", context="notebook")
 
     plt.figure(figsize=(8, 5))
@@ -199,9 +261,9 @@ def make_eda_visualizations(df: pd.DataFrame) -> None:
         plt.xlabel(col.replace("_", " ").title())
         plt.xticks(rotation=35, ha="right")
         save_plot(filename)
-        
-        # added correlation heatmap, to answer questions like: are budget, revenue, and score actually related?
-        numeric_corr_cols = [
+
+    # Correlation heatmap for numeric variables.
+    numeric_corr_cols = [
         "score",
         "budget",
         "revenue",
@@ -225,6 +287,7 @@ def regression_metrics(
     preds: np.ndarray,
     model_name: str,
 ) -> dict[str, float]:
+    """Return standard regression metrics."""
     return {
         "model": model_name,
         "rmse": float(np.sqrt(mean_squared_error(y_true, preds))),
@@ -232,9 +295,9 @@ def regression_metrics(
         "r2": float(r2_score(y_true, preds)),
     }
 
-# Always predicts the average score. this is the simplest possible baseline. 
-# If the models can't beat this by much, that tells us the available features may not be very predictive.
+
 def mean_score_baseline(df: pd.DataFrame) -> dict[str, float]:
+    """Baseline that always predicts the training-set mean score."""
     y = df["score"]
 
     y_train, y_test = train_test_split(
@@ -248,9 +311,9 @@ def mean_score_baseline(df: pd.DataFrame) -> dict[str, float]:
 
     return regression_metrics(y_test, mean_prediction, "Mean score baseline")
 
-# Uses only budget and revenue in a linear regression model.
-# this is a simple regression baseline using only financial features.
+
 def regression_baseline(df: pd.DataFrame) -> dict[str, float]:
+    """Simple linear regression baseline using only budget and revenue."""
     X = df[["budget", "revenue"]]
     y = df["score"]
 
@@ -274,22 +337,10 @@ def regression_baseline(df: pd.DataFrame) -> dict[str, float]:
 
     return regression_metrics(y_test, preds, "Baseline linear regression")
 
-# Uses engineered numeric features plus categorical features.
-# tests whether preprocessing and extra movie metadata improve prediction over the simpler baseline.
-
 
 def improved_regression(df: pd.DataFrame) -> tuple[dict[str, float], Pipeline]:
-    numeric_features = [
-        "log_budget",
-        "log_revenue",
-        "log_profit_shifted",
-        "roi_capped",
-        "release_year",
-    ]
-
-    categorical_features = ["main_genre", "language", "country"]
-
-    X = df[numeric_features + categorical_features]
+    """Linear regression with engineered numeric features and encoded categories."""
+    X = df[NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES]
     y = df["score"]
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -299,7 +350,7 @@ def improved_regression(df: pd.DataFrame) -> tuple[dict[str, float], Pipeline]:
         random_state=RANDOM_STATE,
     )
 
-    preprocessor = make_preprocessor(numeric_features, categorical_features)
+    preprocessor = make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES)
 
     model = Pipeline(
         steps=[
@@ -313,37 +364,138 @@ def improved_regression(df: pd.DataFrame) -> tuple[dict[str, float], Pipeline]:
 
     return regression_metrics(y_test, preds, "Improved linear regression"), model
 
-# converts score into three categories. Then it trains logistic regression to classify movies into these groups.
-# this gives the project a classification component 
-# It also avoids the overly simple “high-rated or not” setup we had before
 
-def classification_model(df: pd.DataFrame) -> dict[str, float]:
+def save_regression_coefficients(model: Pipeline) -> None:
+    """Save improved regression coefficients for interpretation."""
+    preprocessor = model.named_steps["preprocessor"]
+    regressor = model.named_steps["regressor"]
+
+    feature_names = preprocessor.get_feature_names_out()
+    coefficients = regressor.coef_
+
+    coef_df = pd.DataFrame(
+        {
+            "feature": feature_names,
+            "coefficient": coefficients,
+            "absolute_coefficient": np.abs(coefficients),
+        }
+    ).sort_values("absolute_coefficient", ascending=False)
+
+    coef_df.to_csv(OUTPUT_DIR / "regression_coefficients.csv", index=False)
+    coef_df.head(20).to_csv(
+        OUTPUT_DIR / "top_regression_coefficients.csv",
+        index=False,
+    )
+
+
+def add_score_category(
+    df: pd.DataFrame,
+    save_cutoffs: bool = False,
+) -> pd.DataFrame:
+    """Create three roughly balanced score categories using quantile binning."""
     data = df.copy()
 
-    # Create 3 score categories:
-    # low: score < 60
-    # medium: 60 <= score < 75
-    # high: score >= 75
+    # qcut finds score thresholds that split the data into roughly equal groups.
+    # We then use cut with those thresholds so we can also save the category ranges.
+    _, bin_edges = pd.qcut(
+        data["score"],
+        q=3,
+        retbins=True,
+        duplicates="drop",
+    )
+
+    labels = ["low", "medium", "high"][: len(bin_edges) - 1]
+
     data["score_category"] = pd.cut(
         data["score"],
-        bins=[0, 60, 75, 100],
-        labels=["low", "medium", "high"],
+        bins=bin_edges,
+        labels=labels,
         include_lowest=True,
     )
 
     data = data.dropna(subset=["score_category"])
 
-    numeric_features = [
-        "log_budget",
-        "log_revenue",
-        "log_profit_shifted",
-        "roi_capped",
-        "release_year",
-    ]
+    if save_cutoffs:
+        cutoff_rows = []
 
-    categorical_features = ["main_genre", "language", "country"]
+        for i, label in enumerate(labels):
+            cutoff_rows.append(
+                {
+                    "category": label,
+                    "score_lower_bound": float(bin_edges[i]),
+                    "score_upper_bound": float(bin_edges[i + 1]),
+                }
+            )
 
-    X = data[numeric_features + categorical_features]
+        pd.DataFrame(cutoff_rows).to_csv(
+            OUTPUT_DIR / "score_category_cutoffs.csv",
+            index=False,
+        )
+
+    return data
+
+def classification_metrics(
+    y_true: pd.Series,
+    preds: np.ndarray,
+    model_name: str,
+    category_distribution: dict[str, float],
+) -> dict[str, float]:
+    """Return standard multi-class classification metrics."""
+    return {
+        "model": model_name,
+        "accuracy": float(accuracy_score(y_true, preds)),
+        "balanced_accuracy": float(balanced_accuracy_score(y_true, preds)),
+        "precision_macro": float(
+            precision_score(y_true, preds, average="macro", zero_division=0)
+        ),
+        "recall_macro": float(
+            recall_score(y_true, preds, average="macro", zero_division=0)
+        ),
+        "f1_macro": float(f1_score(y_true, preds, average="macro", zero_division=0)),
+        "precision_weighted": float(
+            precision_score(y_true, preds, average="weighted", zero_division=0)
+        ),
+        "recall_weighted": float(
+            recall_score(y_true, preds, average="weighted", zero_division=0)
+        ),
+        "f1_weighted": float(
+            f1_score(y_true, preds, average="weighted", zero_division=0)
+        ),
+        "low_rate": float(category_distribution.get("low", 0)),
+        "medium_rate": float(category_distribution.get("medium", 0)),
+        "high_rate": float(category_distribution.get("high", 0)),
+    }
+
+
+def classification_majority_baseline(df: pd.DataFrame) -> dict[str, float]:
+    """Baseline that always predicts the most common score category."""
+    data = add_score_category(df)
+    y = data["score_category"].astype(str)
+
+    y_train, y_test = train_test_split(
+        y,
+        test_size=0.2,
+        random_state=RANDOM_STATE,
+        stratify=y,
+    )
+
+    majority_class = y_train.mode()[0]
+    preds = np.full(shape=len(y_test), fill_value=majority_class)
+    category_distribution = y.value_counts(normalize=True).to_dict()
+
+    return classification_metrics(
+        y_test,
+        preds,
+        "Majority class baseline: score category",
+        category_distribution,
+    )
+
+
+def classification_model(df: pd.DataFrame) -> dict[str, float]:
+    """Logistic regression classification for low/medium/high score categories."""
+    data = add_score_category(df, save_cutoffs=True)
+
+    X = data[NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES]
     y = data["score_category"].astype(str)
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -356,7 +508,10 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
 
     model = Pipeline(
         steps=[
-            ("preprocessor", make_preprocessor(numeric_features, categorical_features)),
+            (
+                "preprocessor",
+                make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES),
+            ),
             (
                 "classifier",
                 LogisticRegression(
@@ -382,8 +537,29 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
     )
 
     confusion.to_csv(OUTPUT_DIR / "score_category_confusion_matrix.csv")
-    
-    # confusion matrix as a heatmap. This will show whether the model mostly confuses low/medium, medium/high, etc.
+
+    labels = ["low", "medium", "high"]
+    confusion_full = confusion.reindex(index=labels, columns=labels, fill_value=0)
+
+    actual_counts = confusion_full.sum(axis=1)
+    predicted_counts = confusion_full.sum(axis=0)
+    correct_counts = pd.Series(np.diag(confusion_full), index=labels)
+
+    error_analysis = pd.DataFrame(
+        {
+            "actual_count": actual_counts,
+            "predicted_count": predicted_counts,
+            "correct_predictions": correct_counts,
+            "recall": correct_counts / actual_counts,
+            "precision": correct_counts / predicted_counts.replace(0, np.nan),
+        }
+    ).round(4)
+
+    error_analysis.to_csv(
+        OUTPUT_DIR / "classification_error_analysis.csv",
+        index_label="score_category",
+    )
+
     plt.figure(figsize=(6, 4))
     sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues")
     plt.title("Score Category Classification Confusion Matrix")
@@ -391,40 +567,19 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
     plt.ylabel("Actual")
     save_plot("score_category_confusion_matrix.png")
 
-    return {
-        "model": "Logistic regression classification: low / medium / high score",
-        "accuracy": float(accuracy_score(y_test, preds)),
-        "precision_macro": float(
-            precision_score(y_test, preds, average="macro", zero_division=0)
-        ),
-        "recall_macro": float(
-            recall_score(y_test, preds, average="macro", zero_division=0)
-        ),
-        "f1_macro": float(f1_score(y_test, preds, average="macro", zero_division=0)),
-        "precision_weighted": float(
-            precision_score(y_test, preds, average="weighted", zero_division=0)
-        ),
-        "recall_weighted": float(
-            recall_score(y_test, preds, average="weighted", zero_division=0)
-        ),
-        "f1_weighted": float(
-            f1_score(y_test, preds, average="weighted", zero_division=0)
-        ),
-        "low_rate": float(category_distribution.get("low", 0)),
-        "medium_rate": float(category_distribution.get("medium", 0)),
-        "high_rate": float(category_distribution.get("high", 0)),
-    }
+    return classification_metrics(
+        y_test,
+        preds,
+        "Logistic regression classification: score quantile category",
+        category_distribution,
+    )
 
-# builds the preprocessing pipeline:
-#   median imputation + scaling for numeric features
-#   most frequent imputation + one-hot encoding for categorical features
-
-# this keeps preprocessing inside the modeling pipeline, which helps avoid messy manual transformations
 
 def make_preprocessor(
     numeric_features: list[str],
     categorical_features: list[str],
 ) -> ColumnTransformer:
+    """Build preprocessing pipeline for numeric and categorical features."""
     numeric_pipeline = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
@@ -445,24 +600,16 @@ def make_preprocessor(
             ("categorical", categorical_pipeline, categorical_features),
         ]
     )
-    
+
+
 def plot_kmeans_elbow(df: pd.DataFrame) -> None:
-    numeric_features = [
-        "log_budget",
-        "log_revenue",
-        "log_profit_shifted",
-        "roi_capped",
-        "release_year",
-    ]
+    """Generate elbow plot to support the chosen number of K-Means clusters."""
+    features = NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES
 
-    categorical_features = ["main_genre", "language", "country"]
-    features = numeric_features + categorical_features
-
-    preprocessor = make_preprocessor(numeric_features, categorical_features)
+    preprocessor = make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES)
     X_processed = preprocessor.fit_transform(df[features])
 
     inertias = []
-
     k_values = range(2, 11)
 
     for k in k_values:
@@ -476,25 +623,13 @@ def plot_kmeans_elbow(df: pd.DataFrame) -> None:
     plt.xlabel("Number of Clusters (k)")
     plt.ylabel("Inertia")
     save_plot("kmeans_elbow_method.png")
-    
-# Runs K-Means clustering and visualizes the clusters with PCA.
-# Note: score is not used as an input to clustering anymore. 
-#   Instead, clusters are created from metadata/financial features, and then average score is analyzed afterward.
-# this avoids circular logic and gives a cleaner unsupervised learning section.
+
 
 def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
-    numeric_features = [
-        "log_budget",
-        "log_revenue",
-        "log_profit_shifted",
-        "roi_capped",
-        "release_year",
-    ]
+    """Run K-Means clustering and visualize clusters using PCA."""
+    features = NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES
 
-    categorical_features = ["main_genre", "language", "country"]
-    features = numeric_features + categorical_features
-
-    preprocessor = make_preprocessor(numeric_features, categorical_features)
+    preprocessor = make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES)
     X_processed = preprocessor.fit_transform(df[features])
 
     kmeans = KMeans(n_clusters=4, random_state=RANDOM_STATE, n_init=20)
@@ -562,23 +697,29 @@ def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def save_results(results: list[dict[str, float]]) -> None:
-    rows = []
+    """Save combined, regression-only, and classification-only result tables."""
+    results_df = pd.DataFrame([dict(result) for result in results])
 
-    for result in results:
-        row = dict(result)
-        rows.append(row)
-
-    pd.DataFrame(rows).to_csv(OUTPUT_DIR / "model_results.csv", index=False)
+    results_df.to_csv(OUTPUT_DIR / "model_results.csv", index=False)
 
     with open(OUTPUT_DIR / "model_results.json", "w", encoding="utf-8") as f:
-        json.dump(rows, f, indent=2)
+        json.dump(results_df.to_dict(orient="records"), f, indent=2)
 
+    regression_results = results_df[results_df["rmse"].notna()].copy()
+    classification_results = results_df[results_df["accuracy"].notna()].copy()
+
+    regression_results.to_csv(OUTPUT_DIR / "regression_results.csv", index=False)
+    classification_results.to_csv(
+        OUTPUT_DIR / "classification_results.csv",
+        index=False,
+    )
 
 def write_summary(
     df: pd.DataFrame,
     results: list[dict[str, float]],
     cluster_profile: pd.DataFrame,
 ) -> None:
+    """Write a short markdown summary of generated project outputs."""
     top_genres = (
         df.groupby("main_genre")
         .agg(
@@ -619,8 +760,9 @@ def write_summary(
         (
             "Use the mean score baseline to show what performance looks like without using "
             "movie features. Use the baseline linear regression to discuss whether budget "
-            "and revenue alone predict score. Use the improved regression and classification "
-            "results to evaluate whether metadata adds predictive value. Use the cluster "
+            "and revenue alone predict score. Use the improved regression to evaluate whether "
+            "metadata adds predictive value. Use the majority-class baseline and logistic "
+            "regression classifier to evaluate score-category classification. Use the cluster "
             "profiles to describe the types of movies that appear together based on financial "
             "and metadata features, then compare their average scores."
         ),
@@ -648,18 +790,30 @@ def main() -> None:
     baseline = regression_baseline(df)
 
     print("Training improved regression...")
-    improved, _ = improved_regression(df)
+    improved, improved_model = improved_regression(df)
+
+    print("Saving regression coefficients...")
+    save_regression_coefficients(improved_model)
+
+    print("Running classification majority baseline...")
+    classification_baseline = classification_majority_baseline(df)
 
     print("Training classification model...")
     classification = classification_model(df)
-    
+
     print("Creating K-Means elbow plot...")
     plot_kmeans_elbow(df)
 
     print("Running K-Means and PCA...")
     cluster_profile = clustering_and_pca(df)
 
-    results = [mean_baseline, baseline, improved, classification]
+    results = [
+        mean_baseline,
+        baseline,
+        improved,
+        classification_baseline,
+        classification,
+    ]
 
     save_results(results)
     write_summary(df, results, cluster_profile)

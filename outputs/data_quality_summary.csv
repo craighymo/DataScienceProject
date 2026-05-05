@@ -1,0 +1,2 @@
+original_rows,cleaned_rows,rows_removed,percent_rows_removed,missing_genre_count,missing_genre_rate,missing_crew_count,missing_crew_rate,zero_budget_count,zero_budget_rate,zero_revenue_count,zero_revenue_rate,score_min,score_max,score_mean,score_median
+10178,9967,211,0.0207,85,0.0084,56,0.0055,0,0.0,73,0.0072,0.0,100.0,63.49705246610336,65.0

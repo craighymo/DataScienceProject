@@ -1,0 +1,4 @@
+category,score_lower_bound,score_upper_bound
+low,10.0,62.0
+medium,62.0,69.0
+high,69.0,100.0

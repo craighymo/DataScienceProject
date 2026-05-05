@@ -1,4 +1,4 @@
-model,rmse,mae,r2
-Mean score baseline,10.329463868315067,7.717587165107513,-0.0005169144241685686
-Basic linear regression,10.12175488797592,7.547620941370385,0.03931611538501267
-Improved linear regression,9.198042356073111,6.723643785891721,0.20665939394773958
+model,rmse,mae,r2,accuracy,balanced_accuracy,precision_macro,recall_macro,f1_macro,precision_weighted,recall_weighted,f1_weighted,low_rate,medium_rate,high_rate
+Mean score baseline,10.329463868315067,7.717587165107513,-0.0005169144241685686,,,,,,,,,,,
+Baseline linear regression,10.12175488797592,7.547620941370385,0.03931611538501267,,,,,,,,,,,
+Improved linear regression,9.21969837411535,6.777818334114462,0.2029192886187231,,,,,,,,,,,
