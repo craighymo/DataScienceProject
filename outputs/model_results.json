@@ -1,6 +1,12 @@
 [
   {
-    "model": "Baseline linear regression",
+    "model": "Mean score baseline",
+    "rmse": 10.329463868315067,
+    "mae": 7.717587165107513,
+    "r2": -0.0005169144241685686
+  },
+  {
+    "model": "Basic linear regression",
     "rmse": 10.12175488797592,
     "mae": 7.547620941370385,
     "r2": 0.03931611538501267

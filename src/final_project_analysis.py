@@ -1,30 +1,10 @@
-"""
-CS439 Final Project
-
-Research question:
-Can movie metadata and financial information explain or predict IMDB movie scores,
-and what types of movies tend to perform best?
-
-Sections:
-1. EDA and visualizations
-2. Linear regression baseline
-3. Improved linear regression with engineered features
-4. Classification: high-rated vs. not high-rated
-5. K-Means clustering + PCA visualization
-"""
-
 from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LOCAL_PKGS = PROJECT_ROOT / ".venv_pkgs"
-if LOCAL_PKGS.exists():
-    sys.path.insert(0, str(LOCAL_PKGS))
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 FIGURE_DIR = OUTPUT_DIR / "figures"
@@ -58,7 +38,6 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-
 
 DATA_PATH = PROJECT_ROOT / "data" / "imdb_movies.csv"
 RANDOM_STATE = 42
@@ -103,15 +82,21 @@ def load_and_clean_data() -> pd.DataFrame:
     df["profit"] = df["revenue"] - df["budget"]
     df["roi"] = np.where(df["budget"] > 0, df["profit"] / df["budget"], np.nan)
     roi_bounds = df["roi"].replace([np.inf, -np.inf], np.nan).quantile([0.01, 0.99])
-    df["roi_capped"] = df["roi"].clip(lower=roi_bounds.loc[0.01], upper=roi_bounds.loc[0.99])
+    df["roi_capped"] = df["roi"].clip(
+        lower=roi_bounds.loc[0.01], upper=roi_bounds.loc[0.99]
+    )
     df["log_budget"] = np.log1p(df["budget"].clip(lower=0))
     df["log_revenue"] = np.log1p(df["revenue"].clip(lower=0))
-    df["log_profit_shifted"] = np.log1p((df["profit"] - df["profit"].min()).clip(lower=0))
+    df["log_profit_shifted"] = np.log1p(
+        (df["profit"] - df["profit"].min()).clip(lower=0)
+    )
 
     # Keep only completed movies with usable score and financial fields.
     cleaned = df[df["status"].eq("Released")].copy()
     cleaned = cleaned.dropna(subset=["score", "budget", "revenue"])
-    cleaned = cleaned[(cleaned["score"] > 0) & (cleaned["budget"] >= 0) & (cleaned["revenue"] >= 0)]
+    cleaned = cleaned[
+        (cleaned["score"] > 0) & (cleaned["budget"] >= 0) & (cleaned["revenue"] >= 0)
+    ]
 
     cleaned.to_csv(OUTPUT_DIR / "cleaned_movies.csv", index=False)
     return cleaned
@@ -221,7 +206,9 @@ def improved_regression(df: pd.DataFrame) -> tuple[dict[str, float], Pipeline]:
     return regression_metrics(y_test, preds, "Improved linear regression"), model
 
 
-def regression_metrics(y_true: pd.Series, preds: np.ndarray, model_name: str) -> dict[str, float]:
+def regression_metrics(
+    y_true: pd.Series, preds: np.ndarray, model_name: str
+) -> dict[str, float]:
     return {
         "model": model_name,
         "rmse": float(np.sqrt(mean_squared_error(y_true, preds))),
@@ -235,7 +222,13 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
     data = df.copy()
     data["high_rated"] = (data["score"] >= high_score_threshold).astype(int)
 
-    numeric_features = ["log_budget", "log_revenue", "profit", "roi_capped", "release_year"]
+    numeric_features = [
+        "log_budget",
+        "log_revenue",
+        "profit",
+        "roi_capped",
+        "release_year",
+    ]
     categorical_features = ["main_genre", "language", "country"]
     X = data[numeric_features + categorical_features]
     y = data["high_rated"]
@@ -249,7 +242,9 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
             ("preprocessor", make_preprocessor(numeric_features, categorical_features)),
             (
                 "classifier",
-                LogisticRegression(max_iter=2000, class_weight="balanced", random_state=RANDOM_STATE),
+                LogisticRegression(
+                    max_iter=2000, class_weight="balanced", random_state=RANDOM_STATE
+                ),
             ),
         ]
     )
@@ -266,7 +261,9 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def make_preprocessor(numeric_features: list[str], categorical_features: list[str]) -> ColumnTransformer:
+def make_preprocessor(
+    numeric_features: list[str], categorical_features: list[str]
+) -> ColumnTransformer:
     numeric_pipeline = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
@@ -289,7 +286,7 @@ def make_preprocessor(numeric_features: list[str], categorical_features: list[st
 
 def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
     numeric_features = [
-        "score",
+        # "score",
         "log_budget",
         "log_revenue",
         "profit",
@@ -346,9 +343,18 @@ def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     profile.to_csv(OUTPUT_DIR / "cluster_profiles.csv", index=False)
-    clustered[["title", "score", "budget", "revenue", "main_genre", "language", "country", "cluster"]].to_csv(
-        OUTPUT_DIR / "movies_with_clusters.csv", index=False
-    )
+    clustered[
+        [
+            "title",
+            "score",
+            "budget",
+            "revenue",
+            "main_genre",
+            "language",
+            "country",
+            "cluster",
+        ]
+    ].to_csv(OUTPUT_DIR / "movies_with_clusters.csv", index=False)
     return profile
 
 
@@ -363,7 +369,9 @@ def save_results(results: list[dict[str, float]]) -> None:
         json.dump(rows, f, indent=2)
 
 
-def write_summary(df: pd.DataFrame, results: list[dict[str, float]], cluster_profile: pd.DataFrame) -> None:
+def write_summary(
+    df: pd.DataFrame, results: list[dict[str, float]], cluster_profile: pd.DataFrame
+) -> None:
     top_genres = (
         df.groupby("main_genre")
         .agg(movie_count=("title", "count"), avg_score=("score", "mean"))
