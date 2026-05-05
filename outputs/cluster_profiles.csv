@@ -1,0 +1,5 @@
+cluster,movie_count,avg_score,median_budget,median_revenue,median_profit,median_roi,median_year,top_genre,top_language,top_country
+0,4466,67.225,25000000.0,60000000.0,31324119.0,1.448,2006.0,Drama,English,AU
+1,3922,64.575,109000000.0,498161445.6,387722299.9,3.719,2018.0,Drama,English,US
+2,1385,57.487,7000000.0,2478806.0,-2787062.0,-0.636,2015.0,Drama,English,US
+3,194,67.861,450000.0,100043590.5,99549647.5,127.86,2008.5,Drama,English,AU
