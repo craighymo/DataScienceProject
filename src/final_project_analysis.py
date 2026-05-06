@@ -41,6 +41,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from matplotlib.ticker import FuncFormatter
 
 DATA_PATH = PROJECT_ROOT / "data" / "imdb_movies.csv"
 RANDOM_STATE = 42
@@ -197,7 +198,6 @@ def load_and_clean_data() -> pd.DataFrame:
         (df["profit"] - df["profit"].min()).clip(lower=0)
     )
     
-    
 
     # Keep only completed movies with usable score and financial fields.
     # Zero budget/revenue values are retained because they are uncommon and
@@ -224,6 +224,25 @@ def save_plot(filename: str) -> None:
     plt.tight_layout()
     plt.savefig(FIGURE_DIR / filename, dpi=200, bbox_inches="tight")
     plt.close()
+    
+def money_formatter(x, pos=None):
+    """Format raw dollar values for plot axes."""
+    if pd.isna(x):
+        return ""
+    x = float(x)
+    if abs(x) >= 1_000_000_000:
+        return f"${x / 1_000_000_000:.1f}B"
+    if abs(x) >= 1_000_000:
+        return f"${x / 1_000_000:.0f}M"
+    if abs(x) >= 1_000:
+        return f"${x / 1_000:.0f}K"
+    return f"${x:.0f}"
+
+def log_money_formatter(x, pos=None):
+    """Format log1p-dollar values as the original dollar scale."""
+    raw_value = np.expm1(x)
+    return money_formatter(raw_value, pos)
+
 
 
 def make_eda_visualizations(df: pd.DataFrame) -> None:
@@ -240,37 +259,69 @@ def make_eda_visualizations(df: pd.DataFrame) -> None:
     sns.histplot(df["budget"], bins=40, color="#7B9E89")
     plt.title("Distribution of Movie Budgets")
     plt.xlabel("Budget")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(money_formatter))
     save_plot("hist_budget.png")
 
     plt.figure(figsize=(8, 5))
     sns.histplot(df["revenue"], bins=40, color="#D17A22")
     plt.title("Distribution of Movie Revenue")
     plt.xlabel("Revenue")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(money_formatter))
     save_plot("hist_revenue.png")
 
     plt.figure(figsize=(8, 5))
     sns.histplot(df["log_budget"], bins=40, kde=True, color="#7B9E89")
     plt.title("Distribution of Log Movie Budgets")
-    plt.xlabel("Log Budget")
+    plt.xlabel("Budget shown on log scale")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(log_money_formatter))
     save_plot("hist_log_budget.png")
 
     plt.figure(figsize=(8, 5))
     sns.histplot(df["log_revenue"], bins=40, kde=True, color="#D17A22")
     plt.title("Distribution of Log Movie Revenue")
-    plt.xlabel("Log Revenue")
+    plt.xlabel("Revenue shown on log scale")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(log_money_formatter))
     save_plot("hist_log_revenue.png")
+    
+    positive_budget = df[df["budget"] > 0].copy()
+    positive_revenue = df[df["revenue"] > 0].copy()
 
+    # Raw budget/revenue vs. score: useful for showing skew and motivating log transforms.
     plt.figure(figsize=(8, 5))
-    sns.scatterplot(data=df, x="budget", y="score", alpha=0.35, edgecolor=None)
-    plt.xscale("symlog")
-    plt.title("Budget vs. Score")
+    sns.scatterplot(data=positive_budget, x="budget", y="score", alpha=0.35, edgecolor=None)
+    plt.xscale("log")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(money_formatter))
+    plt.title("Raw Budget vs. Score")
+    plt.xlabel("Budget")
+    plt.ylabel("Score")
     save_plot("scatter_budget_score.png")
 
     plt.figure(figsize=(8, 5))
-    sns.scatterplot(data=df, x="revenue", y="score", alpha=0.35, edgecolor=None)
-    plt.xscale("symlog")
-    plt.title("Revenue vs. Score")
+    sns.scatterplot(data=positive_revenue, x="revenue", y="score", alpha=0.35, edgecolor=None)
+    plt.xscale("log")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(money_formatter))
+    plt.title("Raw Revenue vs. Score")
+    plt.xlabel("Revenue")
+    plt.ylabel("Score")
     save_plot("scatter_revenue_score.png")
+
+    # Log budget/revenue vs. score: better for interpretation and consistent with model features.
+    # The x-values are log1p values, but the tick labels show the equivalent original dollar amounts.
+    plt.figure(figsize=(8, 5))
+    sns.scatterplot(data=positive_budget, x="log_budget", y="score", alpha=0.35, edgecolor=None)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(log_money_formatter))
+    plt.title("Log Budget vs. Score")
+    plt.xlabel("Budget shown on log scale")
+    plt.ylabel("Score")
+    save_plot("scatter_log_budget_score.png")
+
+    plt.figure(figsize=(8, 5))
+    sns.scatterplot(data=positive_revenue, x="log_revenue", y="score", alpha=0.35, edgecolor=None)
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(log_money_formatter))
+    plt.title("Log Revenue vs. Score")
+    plt.xlabel("Revenue shown on log scale")
+    plt.ylabel("Score")
+    save_plot("scatter_log_revenue_score.png")
 
     for col, filename, title in [
         ("main_genre", "box_score_by_genre.png", "Score by Main Genre"),
