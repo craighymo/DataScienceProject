@@ -36,7 +36,7 @@ from sklearn.metrics import (
     precision_score,
     r2_score,
     recall_score,
-    silhouette_score
+    silhouette_score,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -44,7 +44,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 DATA_PATH = PROJECT_ROOT / "data" / "imdb_movies.csv"
 RANDOM_STATE = 42
-
+KMEANS_N_CLUSTERS = 4
 
 NUMERIC_MODEL_FEATURES = [
     "log_budget",
@@ -59,7 +59,6 @@ NUMERIC_MODEL_FEATURES = [
 # with the binary is_english feature. Country is excluded because data quality
 # checks suggested it was not a reliable production-country variable.
 CATEGORICAL_MODEL_FEATURES = []
-
 
 def ensure_output_dirs() -> None:
     """Create output folders used by the project."""
@@ -703,7 +702,7 @@ def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
     preprocessor = make_preprocessor(numeric_features, categorical_features)
     X_processed = preprocessor.fit_transform(df[features])
 
-    kmeans = KMeans(n_clusters=4, random_state=RANDOM_STATE, n_init=20)
+    kmeans = KMeans(n_clusters=KMEANS_N_CLUSTERS, random_state=RANDOM_STATE, n_init=20)
     labels = kmeans.fit_predict(X_processed)
 
     pca = PCA(n_components=2, random_state=RANDOM_STATE)
