@@ -36,6 +36,7 @@ from sklearn.metrics import (
     precision_score,
     r2_score,
     recall_score,
+    silhouette_score
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -51,9 +52,13 @@ NUMERIC_MODEL_FEATURES = [
     "log_profit_shifted",
     "roi_capped",
     "release_year",
+    "is_english",
 ]
 
-CATEGORICAL_MODEL_FEATURES = ["main_genre", "language", "country"]
+# Genre is handled with multi-hot encoded columns, and language is summarized
+# with the binary is_english feature. Country is excluded because data quality
+# checks suggested it was not a reliable production-country variable.
+CATEGORICAL_MODEL_FEATURES = []
 
 
 def ensure_output_dirs() -> None:
@@ -114,9 +119,22 @@ def group_rare_categories(
     column: str,
     min_count: int = 50,
 ) -> pd.Series:
+    """Group infrequent category values into Other."""
     counts = df[column].value_counts()
     common_values = counts[counts >= min_count].index
     return df[column].where(df[column].isin(common_values), "Other")
+
+
+def get_genre_features(df: pd.DataFrame) -> list[str]:
+    """Return all multi-hot encoded genre feature columns."""
+    return [col for col in df.columns if col.startswith("genre_")]
+
+
+def get_model_feature_lists(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    """Return numeric and categorical feature lists for the main models."""
+    numeric_features = NUMERIC_MODEL_FEATURES + get_genre_features(df)
+    categorical_features = CATEGORICAL_MODEL_FEATURES
+    return numeric_features, categorical_features
 
 
 def load_and_clean_data() -> pd.DataFrame:
@@ -137,8 +155,20 @@ def load_and_clean_data() -> pd.DataFrame:
     df["release_year"] = df["release_date"].dt.year
 
     df["genre"] = df["genre"].apply(normalize_text)
+    df["genre"] = df["genre"].str.replace(", ", ",", regex=False)
     df["main_genre"] = df["genre"].str.split(",").str[0].apply(normalize_text)
+
+    # Use all listed genres for modeling by creating multi-hot genre columns.
+    # main_genre is still kept for simpler EDA plots and cluster summaries.
+    genre_dummies = (
+        df["genre"]
+        .str.get_dummies(sep=",")
+        .rename(columns=lambda c: "genre_" + c.strip().replace(" ", "_"))
+    )
+    df = pd.concat([df, genre_dummies], axis=1)
+
     df["language"] = df["language"].apply(normalize_text)
+    df["is_english"] = (df["language"].str.lower() == "english").astype(int)
     df["country"] = df["country"].apply(normalize_text)
     df["status"] = df["status"].apply(normalize_text)
 
@@ -246,7 +276,6 @@ def make_eda_visualizations(df: pd.DataFrame) -> None:
     for col, filename, title in [
         ("main_genre", "box_score_by_genre.png", "Score by Main Genre"),
         ("language", "box_score_by_language.png", "Score by Original Language"),
-        ("country", "box_score_by_country.png", "Score by Country"),
     ]:
         top_values = df[col].value_counts().head(10).index
         subset = df[df[col].isin(top_values)].copy()
@@ -270,6 +299,7 @@ def make_eda_visualizations(df: pd.DataFrame) -> None:
         "profit",
         "roi_capped",
         "release_year",
+        "is_english",
         "log_budget",
         "log_revenue",
         "log_profit_shifted",
@@ -340,7 +370,9 @@ def regression_baseline(df: pd.DataFrame) -> dict[str, float]:
 
 def improved_regression(df: pd.DataFrame) -> tuple[dict[str, float], Pipeline]:
     """Linear regression with engineered numeric features and encoded categories."""
-    X = df[NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES]
+    numeric_features, categorical_features = get_model_feature_lists(df)
+
+    X = df[numeric_features + categorical_features]
     y = df["score"]
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -350,7 +382,7 @@ def improved_regression(df: pd.DataFrame) -> tuple[dict[str, float], Pipeline]:
         random_state=RANDOM_STATE,
     )
 
-    preprocessor = make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES)
+    preprocessor = make_preprocessor(numeric_features, categorical_features)
 
     model = Pipeline(
         steps=[
@@ -495,7 +527,9 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
     """Logistic regression classification for low/medium/high score categories."""
     data = add_score_category(df, save_cutoffs=True)
 
-    X = data[NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES]
+    numeric_features, categorical_features = get_model_feature_lists(data)
+
+    X = data[numeric_features + categorical_features]
     y = data["score_category"].astype(str)
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -510,7 +544,7 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
         steps=[
             (
                 "preprocessor",
-                make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES),
+                make_preprocessor(numeric_features, categorical_features),
             ),
             (
                 "classifier",
@@ -604,9 +638,10 @@ def make_preprocessor(
 
 def plot_kmeans_elbow(df: pd.DataFrame) -> None:
     """Generate elbow plot to support the chosen number of K-Means clusters."""
-    features = NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES
+    numeric_features, categorical_features = get_model_feature_lists(df)
+    features = numeric_features + categorical_features
 
-    preprocessor = make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES)
+    preprocessor = make_preprocessor(numeric_features, categorical_features)
     X_processed = preprocessor.fit_transform(df[features])
 
     inertias = []
@@ -623,13 +658,49 @@ def plot_kmeans_elbow(df: pd.DataFrame) -> None:
     plt.xlabel("Number of Clusters (k)")
     plt.ylabel("Inertia")
     save_plot("kmeans_elbow_method.png")
+    
+def plot_kmeans_silhouette(df: pd.DataFrame) -> None:
+    """Generate silhouette score plot to support the chosen number of K-Means clusters."""
+    numeric_features, categorical_features = get_model_feature_lists(df)
+    features = numeric_features + categorical_features
+
+    preprocessor = make_preprocessor(numeric_features, categorical_features)
+    X_processed = preprocessor.fit_transform(df[features])
+
+    silhouette_scores = []
+    k_values = range(2, 11)
+
+    for k in k_values:
+        kmeans = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=20)
+        labels = kmeans.fit_predict(X_processed)
+        silhouette_scores.append(silhouette_score(X_processed, labels))
+
+    silhouette_df = pd.DataFrame(
+        {
+            "k": list(k_values),
+            "silhouette_score": silhouette_scores,
+        }
+    )
+
+    silhouette_df.to_csv(
+        OUTPUT_DIR / "kmeans_silhouette_scores.csv",
+        index=False,
+    )
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(list(k_values), silhouette_scores, marker="o")
+    plt.title("K-Means Silhouette Scores")
+    plt.xlabel("Number of Clusters (k)")
+    plt.ylabel("Silhouette Score")
+    save_plot("kmeans_silhouette_scores.png")
 
 
 def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
     """Run K-Means clustering and visualize clusters using PCA."""
-    features = NUMERIC_MODEL_FEATURES + CATEGORICAL_MODEL_FEATURES
+    numeric_features, categorical_features = get_model_feature_lists(df)
+    features = numeric_features + categorical_features
 
-    preprocessor = make_preprocessor(NUMERIC_MODEL_FEATURES, CATEGORICAL_MODEL_FEATURES)
+    preprocessor = make_preprocessor(numeric_features, categorical_features)
     X_processed = preprocessor.fit_transform(df[features])
 
     kmeans = KMeans(n_clusters=4, random_state=RANDOM_STATE, n_init=20)
@@ -637,6 +708,18 @@ def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
 
     pca = PCA(n_components=2, random_state=RANDOM_STATE)
     components = pca.fit_transform(X_processed)
+    
+    pca_variance = pd.DataFrame(
+        {
+            "component": ["PC1", "PC2"],
+            "explained_variance_ratio": pca.explained_variance_ratio_,
+        }
+    )
+
+    pca_variance.to_csv(
+        OUTPUT_DIR / "pca_explained_variance.csv",
+        index=False,
+    )
 
     clustered = df.copy()
     clustered["cluster"] = labels
@@ -671,7 +754,6 @@ def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
             median_year=("release_year", "median"),
             top_genre=("main_genre", lambda s: s.value_counts().index[0]),
             top_language=("language", lambda s: s.value_counts().index[0]),
-            top_country=("country", lambda s: s.value_counts().index[0]),
         )
         .round(3)
         .reset_index()
@@ -688,6 +770,7 @@ def clustering_and_pca(df: pd.DataFrame) -> pd.DataFrame:
             "profit",
             "main_genre",
             "language",
+            "is_english",
             "country",
             "cluster",
         ]
@@ -803,6 +886,9 @@ def main() -> None:
 
     print("Creating K-Means elbow plot...")
     plot_kmeans_elbow(df)
+    
+    print("Creating K-Means silhouette plot...")
+    plot_kmeans_silhouette(df)
 
     print("Running K-Means and PCA...")
     cluster_profile = clustering_and_pca(df)

@@ -1,5 +1,5 @@
-cluster,movie_count,avg_score,median_budget,median_revenue,median_profit,median_roi,median_year,top_genre,top_language,top_country
-0,4016,63.93,20000000.0,28565459.5,5270200.5,0.367,2013.0,Drama,English,AU
-1,4189,65.008,105400000.0,462439605.0,358120106.0,3.601,2017.0,Action,English,AU
-2,195,67.862,450000.0,100216295.0,99550000.0,127.86,2009.0,Drama,English,AU
-3,1567,66.356,20000000.0,63465522.0,43423795.0,2.479,1985.0,Drama,English,AU
+cluster,movie_count,avg_score,median_budget,median_revenue,median_profit,median_roi,median_year,top_genre,top_language
+0,2310,66.953,88450000.0,329856760.8,222875665.9,2.686,2012.0,Animation,English
+1,3575,62.738,27000000.0,61416888.0,38493064.0,1.787,2013.0,Action,English
+2,279,69.814,38000000.0,81600000.0,40100000.0,1.804,2009.0,Drama,English
+3,3803,65.171,51270000.0,180591246.6,125726374.4,2.898,2013.0,Drama,English

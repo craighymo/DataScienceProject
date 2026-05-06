@@ -1,4 +1,4 @@
 score_category,actual_count,predicted_count,correct_predictions,recall,precision
-low,733,722,405,0.5525,0.5609
-medium,602,562,216,0.3588,0.3843
-high,659,710,408,0.6191,0.5746
+low,733,832,448,0.6112,0.5385
+medium,602,406,150,0.2492,0.3695
+high,659,756,405,0.6146,0.5357
