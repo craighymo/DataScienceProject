@@ -878,16 +878,6 @@ def write_summary(
         cluster_profile.to_string(index=False),
         "```",
         "",
-        "## Interpretation Starter",
-        (
-            "Use the mean score baseline to show what performance looks like without using "
-            "movie features. Use the baseline linear regression to discuss whether budget "
-            "and revenue alone predict score. Use the improved regression to evaluate whether "
-            "metadata adds predictive value. Use the majority-class baseline and logistic "
-            "regression classifier to evaluate score-category classification. Use the cluster "
-            "profiles to describe the types of movies that appear together based on financial "
-            "and metadata features, then compare their average scores."
-        ),
     ]
 
     (OUTPUT_DIR / "project_summary.md").write_text(
