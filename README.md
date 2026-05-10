@@ -4,30 +4,6 @@ This repository contains the code and files for our CS439 Intro to Data Science 
 
 The goal of this project is to explore whether IMDb movie scores can be predicted or explained using movie metadata and financial features. The main task is regression, where we predict the numerical IMDb `score`. We also include a secondary classification task that groups movies into low, medium, and high score categories, along with an exploratory K-Means/PCA clustering analysis.
 
-## Project Structure
-
-```text
-imdb-movie-score-analysis/
-│
-├── data/
-│   └── imdb_movies.csv
-│
-├── src/
-│   └── imdb_movie_score_analysis.py
-│
-├── outputs/
-│   ├── figures/
-│   ├── model_results.csv
-│   ├── regression_results.csv
-│   ├── classification_results.csv
-│   ├── cluster_profiles.csv
-│   └── cleaned_movies.csv
-│
-├── README.md
-├── requirements.txt
-└── .gitignore
-```
-
 ## Dataset
 
 The dataset file should be placed in the `data/` folder:
