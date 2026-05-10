@@ -56,9 +56,6 @@ NUMERIC_MODEL_FEATURES = [
     "is_english",
 ]
 
-# Genre is handled with multi-hot encoded columns, and language is summarized
-# with the binary is_english feature. Country is excluded because data quality
-# checks suggested it was not a reliable production-country variable.
 CATEGORICAL_MODEL_FEATURES = []
 
 def ensure_output_dirs() -> None:
@@ -158,8 +155,6 @@ def load_and_clean_data() -> pd.DataFrame:
     df["genre"] = df["genre"].str.replace(", ", ",", regex=False)
     df["main_genre"] = df["genre"].str.split(",").str[0].apply(normalize_text)
 
-    # Use all listed genres for modeling by creating multi-hot genre columns.
-    # main_genre is still kept for simpler EDA plots and cluster summaries.
     genre_dummies = (
         df["genre"]
         .str.get_dummies(sep=",")
@@ -198,10 +193,6 @@ def load_and_clean_data() -> pd.DataFrame:
         (df["profit"] - df["profit"].min()).clip(lower=0)
     )
     
-
-    # Keep only completed movies with usable score and financial fields.
-    # Zero budget/revenue values are retained because they are uncommon and
-    # may represent unreported values rather than true zeros.
     cleaned = df[df["status"].eq("Released")].copy()
     cleaned = cleaned.dropna(subset=["score", "budget", "revenue"])
     cleaned = cleaned[
@@ -210,7 +201,7 @@ def load_and_clean_data() -> pd.DataFrame:
         & (cleaned["revenue"] >= 0)
     ]
 
-    # Group rare categories after filtering so counts reflect the final dataset.
+    # Group rare categories after filtering 
     for col in ["main_genre", "language", "country"]:
         cleaned[col] = group_rare_categories(cleaned, col, min_count=50)
 
@@ -305,8 +296,7 @@ def make_eda_visualizations(df: pd.DataFrame) -> None:
     plt.ylabel("Score")
     save_plot("scatter_revenue_score.png")
 
-    # Log budget/revenue vs. score: better for interpretation and consistent with model features.
-    # The x-values are log1p values, but the tick labels show the equivalent original dollar amounts.
+    # log budget/revenue vs. score
     plt.figure(figsize=(8, 5))
     sns.scatterplot(data=positive_budget, x="log_budget", y="score", alpha=0.35, edgecolor=None)
     plt.gca().xaxis.set_major_formatter(FuncFormatter(log_money_formatter))
@@ -341,7 +331,7 @@ def make_eda_visualizations(df: pd.DataFrame) -> None:
         plt.xticks(rotation=35, ha="right")
         save_plot(filename)
 
-    # Correlation heatmap for numeric variables.
+    # correlation heatmap for numeric variables
     numeric_corr_cols = [
         "score",
         "budget",
@@ -612,22 +602,21 @@ def classification_model(df: pd.DataFrame) -> dict[str, float]:
 
     category_distribution = y.value_counts(normalize=True).to_dict()
 
+    labels = ["low", "medium", "high"]
+
     confusion = pd.crosstab(
         y_test,
         preds,
         rownames=["Actual"],
         colnames=["Predicted"],
         dropna=False,
-    )
+    ).reindex(index=labels, columns=labels, fill_value=0)
 
     confusion.to_csv(OUTPUT_DIR / "score_category_confusion_matrix.csv")
 
-    labels = ["low", "medium", "high"]
-    confusion_full = confusion.reindex(index=labels, columns=labels, fill_value=0)
-
-    actual_counts = confusion_full.sum(axis=1)
-    predicted_counts = confusion_full.sum(axis=0)
-    correct_counts = pd.Series(np.diag(confusion_full), index=labels)
+    actual_counts = confusion.sum(axis=1)
+    predicted_counts = confusion.sum(axis=0)
+    correct_counts = pd.Series(np.diag(confusion), index=labels)
 
     error_analysis = pd.DataFrame(
         {
